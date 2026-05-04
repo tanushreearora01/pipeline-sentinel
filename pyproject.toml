@@ -43,9 +43,9 @@ pandas = ["pandas>=1.0"]
 dev = ["pytest>=7", "build", "twine"]
 
 [project.urls]
-Homepage = "https://github.com/tanushreearora/pipeline-sentinel"
-Repository = "https://github.com/tanushreearora/pipeline-sentinel"
-"Bug Tracker" = "https://github.com/tanushreearora/pipeline-sentinel/issues"
+Homepage = "https://github.com/tanushreearora01/pipeline-sentinel"
+Repository = "https://github.com/tanushreearora01/pipeline-sentinel"
+"Bug Tracker" = "https://github.com/tanushreearora01/pipeline-sentinel/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
