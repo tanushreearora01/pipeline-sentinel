@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pipeline-sentinel"
+version = "0.1.0"
+description = "Lightweight data observability for Microsoft Fabric and Azure Databricks — anomaly detection + automatic lineage tracking, zero dependencies."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Tanushree Arora", email = "aroratanushree.28@gmail.com" }
+]
+keywords = [
+    "data-engineering",
+    "anomaly-detection",
+    "data-observability",
+    "pyspark",
+    "databricks",
+    "microsoft-fabric",
+    "data-lineage",
+    "pipeline-monitoring",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+]
+requires-python = ">=3.8"
+dependencies = []   # zero hard dependencies — stdlib only
+
+[project.optional-dependencies]
+spark = ["pyspark>=3.0"]
+pandas = ["pandas>=1.0"]
+dev = ["pytest>=7", "build", "twine"]
+
+[project.urls]
+Homepage = "https://github.com/tanushreearora/pipeline-sentinel"
+Repository = "https://github.com/tanushreearora/pipeline-sentinel"
+"Bug Tracker" = "https://github.com/tanushreearora/pipeline-sentinel/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
