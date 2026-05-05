@@ -5,7 +5,7 @@ Supports: notebook logging, Delta table persistence, Teams webhook.
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.parse import urlparse
 from .models import Anomaly, Severity
@@ -112,65 +112,73 @@ class AlertManager:
         print(f"\n{'━' * 60}\n")
 
     def _send_teams(self, anomalies: List[Anomaly]) -> None:
-        """Send an adaptive card to a Teams channel via webhook."""
-        try:
-            import urllib.request
-            highest = max(anomalies, key=lambda a: self._severity_order.index(a.severity))
-            color_map = {
-                Severity.LOW: "Good",
-                Severity.MEDIUM: "Warning",
-                Severity.HIGH: "Attention",
-                Severity.CRITICAL: "Attention",
-            }
-            facts = []
-            for a in anomalies[:10]:   # Teams card limit
-                facts.append({"title": f"[{a.severity.value}] {a.anomaly_type.value}", "value": a.message})
+        """Send an adaptive card to a Teams channel via webhook (up to 2 retries)."""
+        import time
+        import urllib.request
 
-            card = {
-                "type": "message",
-                "attachments": [{
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.4",
-                        "body": [
-                            {
-                                "type": "TextBlock",
-                                "text": f"🚨 Pipeline Sentinel Alert — {len(anomalies)} anomaly(ies)",
-                                "weight": "Bolder",
-                                "size": "Medium",
-                                "color": color_map.get(highest.severity, "Attention"),
-                            },
-                            {
-                                "type": "TextBlock",
-                                "text": f"Pipeline: **{highest.pipeline_name}** | Table: **{highest.table_name}**",
-                                "wrap": True,
-                            },
-                            {"type": "FactSet", "facts": facts},
-                            {
-                                "type": "TextBlock",
-                                "text": f"Detected at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
-                                "size": "Small",
-                                "isSubtle": True,
-                            },
-                        ],
-                    },
-                }],
-            }
+        highest = max(anomalies, key=lambda a: self._severity_order.index(a.severity))
+        color_map = {
+            Severity.LOW: "Good",
+            Severity.MEDIUM: "Warning",
+            Severity.HIGH: "Attention",
+            Severity.CRITICAL: "Attention",
+        }
+        facts = []
+        for a in anomalies[:10]:   # Teams card limit
+            facts.append({"title": f"[{a.severity.value}] {a.anomaly_type.value}", "value": a.message})
 
-            payload = json.dumps(card).encode("utf-8")
-            req = urllib.request.Request(
-                self.teams_webhook_url,
-                data=payload,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status not in (200, 202):
-                    logger.warning("Teams webhook returned status %s", resp.status)
-        except Exception as exc:
-            logger.error("Failed to send Teams alert: %s", exc)
+        card = {
+            "type": "message",
+            "attachments": [{
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": [
+                        {
+                            "type": "TextBlock",
+                            "text": f"🚨 Pipeline Sentinel Alert — {len(anomalies)} anomaly(ies)",
+                            "weight": "Bolder",
+                            "size": "Medium",
+                            "color": color_map.get(highest.severity, "Attention"),
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": f"Pipeline: **{highest.pipeline_name}** | Table: **{highest.table_name}**",
+                            "wrap": True,
+                        },
+                        {"type": "FactSet", "facts": facts},
+                        {
+                            "type": "TextBlock",
+                            "text": f"Detected at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+                            "size": "Small",
+                            "isSubtle": True,
+                        },
+                    ],
+                },
+            }],
+        }
+
+        payload = json.dumps(card).encode("utf-8")
+        last_exc: Optional[Exception] = None
+        for attempt in range(3):
+            try:
+                req = urllib.request.Request(
+                    self.teams_webhook_url,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status not in (200, 202):
+                        logger.warning("Teams webhook returned status %s", resp.status)
+                    return
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(2 ** attempt)  # 1s, 2s back-off
+        logger.error("Failed to send Teams alert after 3 attempts: %s", last_exc)
 
     def _write_delta(self, anomalies: List[Anomaly]) -> None:
         """Persist anomalies to a Delta table. Requires active SparkSession."""
