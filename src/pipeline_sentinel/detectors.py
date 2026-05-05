@@ -1,11 +1,10 @@
 """
 Anomaly detection engine for pipeline_sentinel.
-Uses Z-score and IQR statistical methods to flag anomalies.
+Uses Z-score statistical methods to flag anomalies.
 """
 
-import hashlib
 import statistics
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 from .models import PipelineRun, Anomaly, AnomalyType, Severity
 
@@ -19,16 +18,6 @@ def _zscore(value: float, history: List[float]) -> Optional[float]:
     if sigma == 0:
         return 0.0
     return (value - mu) / sigma
-
-
-def _iqr_bounds(history: List[float], multiplier: float = 1.5):
-    """Return (lower, upper) IQR-based outlier bounds."""
-    sorted_h = sorted(history)
-    n = len(sorted_h)
-    q1 = sorted_h[n // 4]
-    q3 = sorted_h[(3 * n) // 4]
-    iqr = q3 - q1
-    return q1 - multiplier * iqr, q3 + multiplier * iqr
 
 
 def _deviation_pct(actual: float, expected: float) -> Optional[float]:
@@ -46,11 +35,6 @@ def _severity_from_zscore(z: float) -> Severity:
     if az >= 2.0:
         return Severity.MEDIUM
     return Severity.LOW
-
-
-def _schema_hash(column_names: List[str]) -> str:
-    joined = ",".join(sorted(column_names))
-    return hashlib.md5(joined.encode()).hexdigest()
 
 
 class AnomalyDetector:
@@ -78,7 +62,7 @@ class AnomalyDetector:
         self, current: PipelineRun, history: List[PipelineRun]
     ) -> List[Anomaly]:
         anomalies: List[Anomaly] = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         anomalies += self._check_row_count(current, history, now)
         anomalies += self._check_processing_time(current, history, now)

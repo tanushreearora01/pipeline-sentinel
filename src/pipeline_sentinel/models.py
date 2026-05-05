@@ -2,11 +2,17 @@
 Data models for pipeline_sentinel
 """
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from enum import Enum
+
+
+def schema_hash(column_names: List[str]) -> str:
+    """Stable MD5 fingerprint of a column set — order-independent."""
+    return hashlib.md5(",".join(sorted(column_names)).encode()).hexdigest()
 
 
 class Severity(str, Enum):
