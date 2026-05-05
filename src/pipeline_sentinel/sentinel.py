@@ -218,14 +218,17 @@ class PipelineSentinel:
         Context manager that also measures wall-clock processing time.
 
         Usage:
-            with sentinel.watch(df=output_df) as ctx:
+            with sentinel.watch(df=output_df):
                 pass
-            print(ctx.anomalies)
+            print(sentinel.last_anomalies)
         """
         start = time.time()
-        yield self
-        elapsed = time.time() - start
-        self.record(df=df, processing_seconds=elapsed, run_id=run_id, metadata=metadata)
+        try:
+            yield self
+        except BaseException:
+            raise
+        else:
+            self.record(df=df, processing_seconds=time.time() - start, run_id=run_id, metadata=metadata)
 
     @property
     def last_anomalies(self) -> List[Anomaly]:

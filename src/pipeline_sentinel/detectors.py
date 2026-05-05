@@ -161,7 +161,7 @@ class AnomalyDetector:
                     message=(
                         f"Column '{col}' null rate {null_rate:.1%} exceeds threshold "
                         f"{self.null_rate_threshold:.1%}"
-                        + (f" (Z={z:.2f})" if z else "")
+                        + (f" (Z={z:.2f})" if z is not None else "")
                     ),
                     detected_at=now,
                     expected_value=statistics.mean(historical_rates) if historical_rates else None,
