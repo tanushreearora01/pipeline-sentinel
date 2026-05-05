@@ -223,6 +223,16 @@ class TestDuplicates:
         anomalies = [a for a in detector.detect(current, history) if a.anomaly_type == AnomalyType.DUPLICATE_SPIKE]
         assert anomalies == []
 
+    def test_first_occurrence_from_zero_baseline_flagged(self):
+        # All history is 0 → sigma=0 → _zscore returns 0.0 → never crosses threshold.
+        # A non-zero current value must still be flagged.
+        detector = AnomalyDetector()
+        history = stable_history(n=10, duplicate_count=0)
+        current = make_run(duplicate_count=500)
+        anomalies = [a for a in detector.detect(current, history) if a.anomaly_type == AnomalyType.DUPLICATE_SPIKE]
+        assert len(anomalies) == 1
+        assert anomalies[0].severity == Severity.MEDIUM
+
 
 class TestSchemaDrift:
     def test_added_column_flagged(self):

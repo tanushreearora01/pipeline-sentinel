@@ -180,17 +180,24 @@ class AnomalyDetector:
             expected = statistics.mean(dup_counts)
             dev = _deviation_pct(cur.duplicate_count, expected)
 
-            if z is not None and z >= self.zscore_threshold:
+            # When all history is zero, sigma=0 so _zscore returns 0.0 which
+            # never crosses the threshold. Any non-zero value is still a spike.
+            zero_baseline = expected == 0.0
+            if zero_baseline or (z is not None and z >= self.zscore_threshold):
+                severity = Severity.MEDIUM if zero_baseline else _severity_from_zscore(z)
+                message = (
+                    f"Duplicate count {cur.duplicate_count:,} detected; historical baseline is zero"
+                    if zero_baseline
+                    else f"Duplicate count {cur.duplicate_count:,} is abnormally high "
+                         f"vs mean {expected:.0f} (Z={z:.2f})"
+                )
                 results.append(Anomaly(
                     pipeline_name=cur.pipeline_name,
                     table_name=cur.table_name,
                     run_id=cur.run_id,
                     anomaly_type=AnomalyType.DUPLICATE_SPIKE,
-                    severity=_severity_from_zscore(z),
-                    message=(
-                        f"Duplicate count {cur.duplicate_count:,} is abnormally high "
-                        f"vs mean {expected:.0f} (Z={z:.2f})"
-                    ),
+                    severity=severity,
+                    message=message,
                     detected_at=now,
                     expected_value=expected,
                     actual_value=float(cur.duplicate_count),
