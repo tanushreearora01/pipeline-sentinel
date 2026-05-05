@@ -9,9 +9,9 @@ from typing import List, Optional
 from .models import PipelineRun, Anomaly, AnomalyType, Severity
 
 
-def _zscore(value: float, history: List[float]) -> Optional[float]:
+def _zscore(value: float, history: List[float], min_n: int = 3) -> Optional[float]:
     """Return Z-score of value against history, or None if insufficient data."""
-    if len(history) < 3:
+    if len(history) < min_n:
         return None
     mu = statistics.mean(history)
     sigma = statistics.stdev(history)
@@ -82,7 +82,7 @@ class AnomalyDetector:
         row_counts = [r.row_count for r in hist]
 
         if len(row_counts) >= self.min_history:
-            z = _zscore(cur.row_count, row_counts)
+            z = _zscore(cur.row_count, row_counts, self.min_history)
             expected = statistics.mean(row_counts)
             dev = _deviation_pct(cur.row_count, expected)
 
@@ -115,7 +115,7 @@ class AnomalyDetector:
         times = [r.processing_time_seconds for r in hist]
 
         if len(times) >= self.min_history:
-            z = _zscore(cur.processing_time_seconds, times)
+            z = _zscore(cur.processing_time_seconds, times, self.min_history)
             expected = statistics.mean(times)
             dev = _deviation_pct(cur.processing_time_seconds, expected)
 
@@ -146,7 +146,7 @@ class AnomalyDetector:
                 historical_rates = [
                     r.null_rates.get(col, 0.0) for r in hist if col in r.null_rates
                 ]
-                z = _zscore(null_rate, historical_rates) if len(historical_rates) >= self.min_history else None
+                z = _zscore(null_rate, historical_rates, self.min_history) if len(historical_rates) >= self.min_history else None
                 severity = _severity_from_zscore(z) if z is not None else (
                     Severity.HIGH if null_rate >= 0.3 else Severity.MEDIUM
                 )
@@ -176,7 +176,7 @@ class AnomalyDetector:
         dup_counts = [r.duplicate_count for r in hist]
 
         if len(dup_counts) >= self.min_history and cur.duplicate_count > 0:
-            z = _zscore(cur.duplicate_count, dup_counts)
+            z = _zscore(cur.duplicate_count, dup_counts, self.min_history)
             expected = statistics.mean(dup_counts)
             dev = _deviation_pct(cur.duplicate_count, expected)
 

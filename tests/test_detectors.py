@@ -73,6 +73,11 @@ def test_zscore_returns_none_with_insufficient_data():
     assert _zscore(100, [100, 200]) is None
 
 
+def test_zscore_respects_custom_min_n():
+    # With min_n=2, a 2-point history should produce a score, not None.
+    assert _zscore(100, [9, 11], min_n=2) is not None
+
+
 def test_zscore_zero_when_all_same():
     assert _zscore(5.0, [5.0, 5.0, 5.0, 5.0]) == 0.0
 
@@ -154,6 +159,16 @@ class TestRowCount:
         current = make_run(row_count=1)
         anomalies = [a for a in detector.detect(current, history) if a.anomaly_type in (AnomalyType.ROW_COUNT_DROP, AnomalyType.ROW_COUNT_SPIKE)]
         assert anomalies == []
+
+    def test_min_history_two_fires_with_two_point_history(self):
+        # min_history=2 must propagate into _zscore so a 2-point baseline works.
+        # Previously _zscore had a hardcoded < 3 guard that silently blocked this.
+        # History must vary so stdev > 0 (identical values give sigma=0 → z=0).
+        detector = AnomalyDetector(zscore_threshold=2.0, min_history=2)
+        history = [make_run(row_count=900, run_id="a"), make_run(row_count=1100, run_id="b")]
+        current = make_run(row_count=1)  # extreme drop — z ≈ -7
+        anomalies = [a for a in detector.detect(current, history) if a.anomaly_type == AnomalyType.ROW_COUNT_DROP]
+        assert len(anomalies) == 1
 
     def test_no_flag_within_normal_range(self):
         detector = AnomalyDetector(zscore_threshold=2.5)
