@@ -38,10 +38,15 @@ Known limitations:
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict, deque
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
+
+# Guards class-level PySpark patching: only one tracker may hold the patch at a time,
+# preventing corrupted method references when multiple notebooks share a Spark session.
+_PATCH_LOCK = threading.Lock()
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -200,7 +205,13 @@ class LineageTracker:
                 "already active on this instance. Use a separate LineageTracker "
                 "instance per concurrent pipeline, or share a LineageGraph instead."
             )
-        run_id = run_id or datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        if not _PATCH_LOCK.acquire(blocking=False):
+            raise RuntimeError(
+                "Another LineageTracker is already patching PySpark on this cluster. "
+                "Only one tracker.track() block may run at a time per process. "
+                "Use separate LineageTracker instances with a shared LineageGraph."
+            )
+        run_id = run_id or datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         self._current_reads  = set()
         self._current_writes = set()
         self._active = True
@@ -211,6 +222,7 @@ class LineageTracker:
         finally:
             self._restore_pyspark(originals)
             self._active = False
+            _PATCH_LOCK.release()
             self._commit(run_id)
 
     # ── Manual API (Pandas / testing / spark.sql notebooks) ─────────────── #
@@ -339,7 +351,7 @@ class LineageTracker:
         meta = {
             "pipeline":  self.pipeline_name,
             "run_id":    run_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         for src in self._current_reads:
             for tgt in self._current_writes:
