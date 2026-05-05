@@ -37,7 +37,7 @@ pip install pipeline-sentinel
 ### Option C — local / CI
 
 ```bash
-git clone https://github.com/your-org/pipeline-sentinel
+git clone https://github.com/tanushreearora01/pipeline-sentinel
 cd pipeline-sentinel
 pip install -e .   # no dependencies beyond stdlib + optional pandas/pyspark
 ```
@@ -99,7 +99,7 @@ with tracker.track():
 | **Row count spike** | Z-score | Flags unexpected volume increases |
 | **Processing time spike** | Z-score | Catches slow jobs before SLA breach |
 | **Null rate spike** | Z-score + absolute threshold | Per-column null rate monitoring |
-| **Duplicate spike** | Z-score | Detects upstream deduplication failures |
+| **Duplicate spike** | Z-score | Detects upstream deduplication failures — opt-in via `check_duplicates=True` (avoids a second full-table scan) |
 | **Schema drift** | Column set diff | Added/removed columns since last run |
 | **Empty dataset** | Absolute | Immediately flags 0-row outputs as CRITICAL |
 
@@ -107,10 +107,10 @@ with tracker.track():
 
 | Severity | Z-score range | Console colour |
 |---|---|---|
-| LOW | 2.0 – 2.9 | Blue |
-| MEDIUM | 3.0 – 3.9 | Yellow |
-| HIGH | 4.0+ | Red |
-| CRITICAL | Always for empty datasets | Magenta |
+| LOW | < 2.0 | Blue |
+| MEDIUM | 2.0 – 2.9 | Yellow |
+| HIGH | 3.0 – 3.9 | Red |
+| CRITICAL | 4.0+ / always for empty datasets | Magenta |
 
 ### Alert sinks
 
@@ -147,6 +147,9 @@ sentinel = PipelineSentinel(
 
     # How many historical runs to compare against (default 30)
     max_history=30,
+
+    # Opt-in duplicate counting (requires a second full-table scan, default False)
+    check_duplicates=False,
 
     # Optional lineage tracker (see Lineage section below)
     lineage_tracker=tracker,
@@ -309,7 +312,7 @@ ORDER BY run_timestamp;
 pipeline_sentinel/
 ├── sentinel.py      # PipelineSentinel — main orchestrator
 ├── lineage.py       # LineageTracker + LineageGraph — auto-lineage
-├── detectors.py     # AnomalyDetector — Z-score + IQR logic
+├── detectors.py     # AnomalyDetector — Z-score logic
 ├── alerts.py        # AlertManager — notebook / Teams / Delta sinks
 └── models.py        # PipelineRun, Anomaly dataclasses
 
@@ -325,7 +328,7 @@ usage_notebook.py    # Full usage example with synthetic data demo
 - PySpark support is auto-detected when running in Fabric / Databricks
 - Pandas fallback works for local testing and CI
 - Teams alerts use `urllib` — no `requests` needed
-- Lineage patching restores all original methods on context exit, even on exceptiongit 
+- Lineage patching restores all original methods on context exit, even on exception
 
 ---
 
