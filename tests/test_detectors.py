@@ -256,6 +256,27 @@ class TestSchemaDrift:
         anomalies = [a for a in detector.detect(current, []) if a.anomaly_type == AnomalyType.SCHEMA_DRIFT]
         assert anomalies == []
 
+    def test_transient_blip_in_last_run_does_not_mask_drift(self):
+        # The last run had a transient extra column "x"; the majority (9 of 10)
+        # had ["a", "b", "c"]. Current run reverts to ["a", "b", "c"] — no drift.
+        history = stable_history(n=9, column_names=["a", "b", "c"])
+        history.append(make_run(column_names=["a", "b", "c", "x"], run_id="blip"))
+        current = make_run(column_names=["a", "b", "c"])
+        detector = AnomalyDetector()
+        anomalies = [a for a in detector.detect(current, history) if a.anomaly_type == AnomalyType.SCHEMA_DRIFT]
+        assert anomalies == []
+
+    def test_drift_detected_against_majority_not_last_run(self):
+        # Last run accidentally had ["a", "b"] (transient drop); majority is ["a", "b", "c"].
+        # Current run also has ["a", "b"] — that IS a real removal vs the majority.
+        history = stable_history(n=9, column_names=["a", "b", "c"])
+        history.append(make_run(column_names=["a", "b"], run_id="blip"))
+        current = make_run(column_names=["a", "b"])
+        detector = AnomalyDetector()
+        anomalies = [a for a in detector.detect(current, history) if a.anomaly_type == AnomalyType.SCHEMA_DRIFT]
+        assert len(anomalies) == 1
+        assert "c" in anomalies[0].context["removed_columns"]
+
 
 class TestDetectAll:
     def test_returns_list(self):

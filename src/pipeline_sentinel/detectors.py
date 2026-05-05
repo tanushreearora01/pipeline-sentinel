@@ -203,14 +203,22 @@ class AnomalyDetector:
         if not cur.column_names or not hist:
             return results
 
-        last_run = hist[-1]
-        if not last_run.column_names:
+        # Use the majority schema from history so a single transient blip
+        # in the last run doesn't mask a real drift (or cause a false negative
+        # when the schema reverts back to normal).
+        schema_counts: dict = {}
+        for r in hist:
+            if r.column_names:
+                key = frozenset(r.column_names)
+                schema_counts[key] = schema_counts.get(key, 0) + 1
+
+        if not schema_counts:
             return results
 
-        prev_cols = set(last_run.column_names)
+        majority_cols = set(max(schema_counts, key=schema_counts.__getitem__))
         curr_cols = set(cur.column_names)
-        added = curr_cols - prev_cols
-        removed = prev_cols - curr_cols
+        added = curr_cols - majority_cols
+        removed = majority_cols - curr_cols
 
         if added or removed:
             parts = []
@@ -225,7 +233,7 @@ class AnomalyDetector:
                 run_id=cur.run_id,
                 anomaly_type=AnomalyType.SCHEMA_DRIFT,
                 severity=Severity.HIGH if removed else Severity.MEDIUM,
-                message=f"Schema changed since last run. {' | '.join(parts)}",
+                message=f"Schema changed vs majority historical schema. {' | '.join(parts)}",
                 detected_at=now,
                 context={"added_columns": list(added), "removed_columns": list(removed)},
             ))
