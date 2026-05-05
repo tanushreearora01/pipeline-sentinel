@@ -21,25 +21,29 @@ with sentinel.watch(run_id="run_20240501_001", df=output_df, processing_seconds=
 sentinel.record(df=output_df, processing_seconds=42.3, run_id="run_001")
 """
 
-import hashlib
+import logging
+import statistics
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from .alerts import AlertManager
 from .detectors import AnomalyDetector
-from .models import Anomaly, PipelineRun, Severity
+from .models import Anomaly, PipelineRun, Severity, schema_hash
+
+logger = logging.getLogger("pipeline_sentinel")
 
 if TYPE_CHECKING:
     from .lineage import LineageTracker
 
 
-def _profile_df(df, spark=None) -> Dict:
+def _profile_df(df, check_duplicates: bool = False) -> Dict:
     """
     Profile a Spark or Pandas DataFrame.
     Returns dict: row_count, null_rates, duplicate_count, column_names.
+    Duplicate counting requires a second full table scan; pass check_duplicates=True to enable it.
     """
     try:
         # Try PySpark first
@@ -50,15 +54,13 @@ def _profile_df(df, spark=None) -> Dict:
             cols = df.columns
             row_count = df.count()
 
-            # Null rates per column
             null_exprs = [
                 F.mean(F.col(c).isNull().cast("int")).alias(c) for c in cols
             ]
             null_row = df.select(null_exprs).collect()[0]
             null_rates = {c: float(null_row[c] or 0.0) for c in cols}
 
-            # Duplicates (all-column)
-            dup_count = row_count - df.dropDuplicates().count()
+            dup_count = (row_count - df.dropDuplicates().count()) if check_duplicates else 0
 
             return {
                 "row_count": row_count,
@@ -76,21 +78,17 @@ def _profile_df(df, spark=None) -> Dict:
             cols = df.columns.tolist()
             row_count = len(df)
             null_rates = (df.isnull().mean()).to_dict()
-            dup_count = df.duplicated().sum()
+            dup_count = int(df.duplicated().sum()) if check_duplicates else 0
             return {
                 "row_count": row_count,
                 "null_rates": null_rates,
-                "duplicate_count": int(dup_count),
+                "duplicate_count": dup_count,
                 "column_names": cols,
             }
     except ImportError:
         pass
 
     raise TypeError("df must be a PySpark or Pandas DataFrame.")
-
-
-def _schema_hash(col_names: List[str]) -> str:
-    return hashlib.md5(",".join(sorted(col_names)).encode()).hexdigest()
 
 
 class PipelineSentinel:
@@ -131,6 +129,7 @@ class PipelineSentinel:
         alert_min_severity: str = "MEDIUM",
         zscore_threshold: float = 2.5,
         null_rate_threshold: float = 0.10,
+        check_duplicates: bool = False,
         lineage_tracker: Optional["LineageTracker"] = None,
     ):
         self.pipeline_name = pipeline_name
@@ -139,6 +138,7 @@ class PipelineSentinel:
         self.delta_anomaly_path = delta_anomaly_path
         self.max_history = max_history
 
+        self.check_duplicates = check_duplicates
         self.lineage_tracker = lineage_tracker
 
         self._history: List[PipelineRun] = list(history_runs or [])
@@ -175,19 +175,19 @@ class PipelineSentinel:
         Returns the list of detected Anomaly objects.
         """
         run_id = run_id or str(uuid.uuid4())[:8]
-        profile = _profile_df(df)
+        profile = _profile_df(df, check_duplicates=self.check_duplicates)
 
         current_run = PipelineRun(
             pipeline_name=self.pipeline_name,
             table_name=self.table_name,
             run_id=run_id,
-            run_timestamp=datetime.utcnow(),
+            run_timestamp=datetime.now(timezone.utc),
             row_count=profile["row_count"],
             processing_time_seconds=processing_seconds,
             null_rates=profile["null_rates"],
             duplicate_count=profile["duplicate_count"],
             column_names=list(profile["column_names"]),
-            schema_hash=_schema_hash(profile["column_names"]),
+            schema_hash=schema_hash(profile["column_names"]),
             metadata=metadata or {},
         )
 
@@ -248,7 +248,6 @@ class PipelineSentinel:
 
         row_counts = [r.row_count for r in self._history]
         times      = [r.processing_time_seconds for r in self._history]
-        import statistics
         lines.append(f"  Row count  avg/min/max : {statistics.mean(row_counts):,.0f} / {min(row_counts):,} / {max(row_counts):,}")
         lines.append(f"  Proc time  avg/min/max : {statistics.mean(times):.1f}s / {min(times):.1f}s / {max(times):.1f}s")
         lines.append(f"{'═' * 55}\n")
@@ -277,11 +276,11 @@ class PipelineSentinel:
                     processing_time_seconds=float(row["processing_time_seconds"]),
                     null_rates=_json.loads(row["null_rates"]),
                     duplicate_count=int(row["duplicate_count"]),
-                    schema_hash=row.get("schema_hash"),
+                    schema_hash=row["schema_hash"] if "schema_hash" in row else None,
                     column_names=_json.loads(row["column_names"]),
                 ))
-        except Exception:
-            pass  # History table may not exist yet on first run
+        except Exception as exc:
+            logger.warning("Could not load history from Delta (table may not exist yet): %s", exc)
 
     def _save_run_to_delta(self, run: PipelineRun):
         try:
@@ -291,5 +290,5 @@ class PipelineSentinel:
                 return
             df = spark.createDataFrame([run.to_dict()])
             df.write.format("delta").mode("append").option("mergeSchema", "true").save(self.history_table_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Could not save run to Delta: %s", exc)
